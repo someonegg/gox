@@ -2,6 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package netx provides net wrappers over the original package,
+// Package dbx provides db wrappers over the original package,
 // "Context" and "concurrency control" is supported.
 package dbx
