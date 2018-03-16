@@ -3,5 +3,5 @@
 // license that can be found in the LICENSE file.
 
 // Package syncx provides synchronization primitives, complementing
-// the more common ones in the net package.
+// the more common ones in the sync package.
 package syncx
