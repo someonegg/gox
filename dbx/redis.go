@@ -5,7 +5,7 @@
 package dbx
 
 import (
-	. "github.com/garyburd/redigo/redis"
+	"github.com/garyburd/redigo/redis"
 	"github.com/someonegg/gox/syncx"
 	"golang.org/x/net/context"
 	"time"
@@ -13,13 +13,13 @@ import (
 
 // RedisPool is a contexted redis pool.
 type RedisPool struct {
-	p      *Pool
+	p      *redis.Pool
 	concur syncx.Semaphore
 }
 
 func NewRedisPool(
-	newFn func() (Conn, error),
-	testFn func(c Conn, t time.Time) error,
+	newFn func() (redis.Conn, error),
+	testFn func(redis.Conn, time.Time) error,
 	idleTimeout time.Duration,
 	maxConcurrent int) *RedisPool {
 
@@ -28,7 +28,7 @@ func NewRedisPool(
 		mi = 2
 	}
 
-	rp := &Pool{
+	rp := &redis.Pool{
 		Dial:         newFn,
 		TestOnBorrow: testFn,
 		MaxIdle:      mi,
@@ -68,7 +68,7 @@ func (p *RedisPool) releaseConn() {
 }
 
 type proxyConn struct {
-	Conn
+	redis.Conn
 	p *RedisPool
 }
 
@@ -77,7 +77,7 @@ func (c *proxyConn) Close() error {
 	return c.Conn.Close()
 }
 
-func (p *RedisPool) Get(ctx context.Context) (Conn, error) {
+func (p *RedisPool) Get(ctx context.Context) (redis.Conn, error) {
 	success := false
 
 	err := p.acquireConn(ctx)

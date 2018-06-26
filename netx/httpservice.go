@@ -37,11 +37,9 @@ type HTTPService struct {
 }
 
 // NewHTTPService is a short cut to use NewHTTPServiceEx.
-func NewHTTPService(l *net.TCPListener, h http.Handler,
-	maxConcurrent int) *HTTPService {
+func NewHTTPService(l *net.TCPListener, h http.Handler) *HTTPService {
 
-	return NewHTTPServiceEx(l, NewMaxConcurrentHandler(NewHTTPHandler(h),
-		maxConcurrent, DefaultHesitateTime, DefaultMaxConcurrentNotifier))
+	return NewHTTPServiceEx(l, NewHTTPHandler(h))
 }
 
 func NewHTTPServiceEx(l *net.TCPListener, h ContextHandler) *HTTPService {
@@ -133,95 +131,3 @@ func (h httpHandler) ContextServeHTTP(ctx context.Context,
 
 	h.oh.ServeHTTP(w, r)
 }
-
-type maxConcurrentHandler struct {
-	oh           ContextHandler
-	concur       syncx.Semaphore
-	hesitateTime time.Duration
-	notifier     MaxConcurrentNotifier
-}
-
-// The maxconcurrent handler type is a middleware that can limit the
-// maximum number of concurrent access.
-// if maxConcurrent == 0, no limit on concurrency.
-// if hesitateTime == 0, use DefaultHesitateTime.
-func NewMaxConcurrentHandler(oh ContextHandler,
-	maxConcurrent int, hesitateTime time.Duration,
-	notifier MaxConcurrentNotifier) ContextHandler {
-
-	if maxConcurrent <= 0 {
-		return oh
-	}
-	if hesitateTime <= 0 {
-		hesitateTime = DefaultHesitateTime
-	}
-
-	return &maxConcurrentHandler{
-		oh:           oh,
-		concur:       syncx.NewSemaphore(maxConcurrent),
-		hesitateTime: hesitateTime,
-		notifier:     notifier,
-	}
-}
-
-const (
-	acquire_OK      int = 0
-	acquire_CtxDone int = 1
-	acquire_Timeout int = 2
-)
-
-func (h *maxConcurrentHandler) acquireConn(ctx context.Context) int {
-	select {
-	case <-ctx.Done():
-		return acquire_CtxDone
-	// Acquire
-	case h.concur <- struct{}{}:
-		return acquire_OK
-	case <-time.After(h.hesitateTime):
-		return acquire_Timeout
-	}
-}
-
-func (h *maxConcurrentHandler) releaseConn() {
-	<-h.concur
-}
-
-func (h *maxConcurrentHandler) ContextServeHTTP(ctx context.Context,
-	w http.ResponseWriter, r *http.Request) {
-
-	ret := h.acquireConn(ctx)
-	switch ret {
-	case acquire_CtxDone:
-		h.notifier.OnContextDone(w, r)
-		return
-	case acquire_Timeout:
-		h.notifier.OnConcurrentLimit(w, r)
-		return
-	}
-	defer h.releaseConn()
-
-	h.oh.ContextServeHTTP(ctx, w, r)
-}
-
-const DefaultHesitateTime = 50 * time.Millisecond
-
-type MaxConcurrentNotifier interface {
-	OnContextDone(w http.ResponseWriter, r *http.Request)
-	OnConcurrentLimit(w http.ResponseWriter, r *http.Request)
-}
-
-type defaultMaxConcurrentNotifier struct{}
-
-func (n defaultMaxConcurrentNotifier) OnContextDone(
-	w http.ResponseWriter, r *http.Request) {
-
-	http.Error(w, "Service Maintenance", http.StatusServiceUnavailable)
-}
-
-func (n defaultMaxConcurrentNotifier) OnConcurrentLimit(
-	w http.ResponseWriter, r *http.Request) {
-
-	http.Error(w, "Service Busy", http.StatusServiceUnavailable)
-}
-
-var DefaultMaxConcurrentNotifier MaxConcurrentNotifier = defaultMaxConcurrentNotifier{}
