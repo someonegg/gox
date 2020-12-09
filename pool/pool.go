@@ -91,27 +91,31 @@ func (p *hugeObjectPool) gc() {
 		<-t.C
 	}
 
+	timing := false
+
 	for {
+		l := 0
+
 		select {
 		case <-p.activeC:
-			if !t.Stop() {
-				select {
-				case <-t.C:
-				default:
-				}
-			}
-			t.Reset(p.cycle)
+			p.mu.Lock()
+			l = p.xs.Len()
+			p.mu.Unlock()
 		case <-t.C:
+			timing = false
+
 			p.mu.Lock()
 			e := p.xs.Front()
 			if e != nil {
 				p.xs.Remove(e)
 			}
-			l := p.xs.Len()
+			l = p.xs.Len()
 			p.mu.Unlock()
-			if l > 0 {
-				t.Reset(p.cycle)
-			}
+		}
+
+		if l > 0 && !timing {
+			timing = true
+			t.Reset(p.cycle)
 		}
 	}
 }
