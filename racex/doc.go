@@ -3,5 +3,6 @@
 // license that can be found in the LICENSE file.
 
 // Package racex provides race primitives.
-//   RaceEnabled : present if build with -race
+//
+//	RaceEnabled : present if build with -race
 package racex
