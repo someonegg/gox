@@ -52,17 +52,17 @@ func TestUniqChan(t *testing.T) {
 	uc.Send("b", "2", false)
 	uc.Send("c", "3", false)
 
-	full := uc.TrySend("d", "4", false)
-	if !full {
-		t.Fatalf("want full")
+	sent := uc.TrySend("d", "4", false)
+	if sent {
+		t.Fatalf("want !sent")
 	}
-	full = uc.TrySend("c", "3.3", false)
-	if full {
-		t.Fatalf("want no full")
+	sent = uc.TrySend("c", "3.3", false)
+	if !sent {
+		t.Fatalf("want sent")
 	}
-	full = uc.TrySend("c", "3.3", true)
-	if full {
-		t.Fatalf("want no full")
+	sent = uc.TrySend("c", "3.3", true)
+	if !sent {
+		t.Fatalf("want sent")
 	}
 
 	k, v = uc.Recv()

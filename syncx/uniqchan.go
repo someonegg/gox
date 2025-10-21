@@ -13,7 +13,13 @@ import (
 type UniqChan[K comparable, V any] struct {
 	l sync.Mutex
 	c chan K
-	m map[K]V
+	m map[K]ucelem[V]
+}
+
+type ucelem[V any] struct {
+	v    V
+	sent DoneChan
+	fail DoneChan
 }
 
 func NewUniqChan[K comparable, V any](cap int) *UniqChan[K, V] {
@@ -22,7 +28,7 @@ func NewUniqChan[K comparable, V any](cap int) *UniqChan[K, V] {
 	}
 	return &UniqChan[K, V]{
 		c: make(chan K, cap),
-		m: make(map[K]V, cap),
+		m: make(map[K]ucelem[V], cap),
 	}
 }
 
@@ -30,52 +36,85 @@ func (uc *UniqChan[K, V]) Send(k K, v V, updateV bool) {
 	uc.SendContext(context.Background(), k, v, updateV)
 }
 
-func (uc *UniqChan[K, V]) SendContext(ctx context.Context, k K, v V, updateV bool) (err error) {
+func (uc *UniqChan[K, V]) SendContext(ctx context.Context, k K, v V, updateV bool) error {
+retry:
 	uc.l.Lock()
-	_, found := uc.m[k]
-	if !found || updateV {
-		uc.m[k] = v
+
+	e, found := uc.m[k]
+	if !found {
+		e.v = v
+		e.sent = NewDoneChan()
+		e.fail = NewDoneChan()
+		uc.m[k] = e
+	} else {
+		if updateV {
+			e.v = v
+			uc.m[k] = e
+		}
 	}
+
 	uc.l.Unlock()
 
 	if found {
-		return
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-e.sent:
+			return nil
+		case <-e.fail:
+			updateV = false
+			goto retry
+		}
 	}
 
 	select {
-	case uc.c <- k:
 	case <-ctx.Done():
-		err = ctx.Err()
-
 		uc.l.Lock()
 		delete(uc.m, k)
 		uc.l.Unlock()
+		e.fail.SetDone()
+		return ctx.Err()
+	case uc.c <- k:
+		e.sent.SetDone()
+		return nil
 	}
-
-	return
 }
 
-func (uc *UniqChan[K, V]) TrySend(k K, v V, updateV bool) (full bool) {
+func (uc *UniqChan[K, V]) TrySend(k K, v V, updateV bool) (sent bool) {
 	uc.l.Lock()
 	defer uc.l.Unlock()
 
-	_, found := uc.m[k]
-	if !found || updateV {
-		uc.m[k] = v
+	e, found := uc.m[k]
+	if !found {
+		e.v = v
+		e.sent = NewDoneChan()
+		e.fail = NewDoneChan()
+		uc.m[k] = e
+	} else {
+		if updateV {
+			e.v = v
+			uc.m[k] = e
+		}
 	}
 
 	if found {
-		return
+		select {
+		case <-e.sent:
+			return true
+		default:
+			return false
+		}
 	}
 
 	select {
 	case uc.c <- k:
+		e.sent.SetDone()
+		return true
 	default:
-		full = true
 		delete(uc.m, k)
+		e.fail.SetDone()
+		return false
 	}
-
-	return
 }
 
 func (uc *UniqChan[K, V]) Recv() (k K, v V) {
@@ -92,7 +131,7 @@ func (uc *UniqChan[K, V]) RecvContext(ctx context.Context) (k K, v V, err error)
 	}
 
 	uc.l.Lock()
-	v = uc.m[k]
+	v = uc.m[k].v
 	delete(uc.m, k)
 	uc.l.Unlock()
 
