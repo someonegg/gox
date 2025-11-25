@@ -4,47 +4,56 @@
 
 package syncx
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
-type SyncFunc struct {
-	fn func(interface{}) error
+type syncFunc struct {
+	f func()
 
-	cond  *sync.Cond
-	once  *callOnce
-	doing bool
+	lock sync.Mutex
+	once *callOnce
 }
 
 type callOnce struct {
 	sync.Once
-	err error
+	enter atomic.Bool
 }
 
-func (s *SyncFunc) Call(arg interface{}) error {
-	s.cond.L.Lock()
-	if s.doing {
-		s.cond.Wait()
-	}
-	s.doing = true
+func (s *syncFunc) Call() {
+	s.lock.Lock()
 	once := s.once
-	s.cond.L.Unlock()
+	s.lock.Unlock()
+
+	if once.enter.Load() {
+		// wait for last call
+		once.Do(func() {})
+
+		// get the latest call
+		s.lock.Lock()
+		once = s.once
+		s.lock.Unlock()
+	}
 
 	once.Do(func() {
-		once.err = s.fn(arg)
+		once.enter.Store(true)
+		s.f()
 
-		s.cond.L.Lock()
-		s.doing = false
+		s.lock.Lock()
 		s.once = &callOnce{}
-		s.cond.Broadcast()
-		s.cond.L.Unlock()
+		s.lock.Unlock()
 	})
-
-	return once.err
 }
 
-func NewSyncFunc(fn func(interface{}) error) *SyncFunc {
-	return &SyncFunc{
-		fn:   fn,
-		cond: sync.NewCond(&sync.Mutex{}),
+// SyncFunc returns a function that invokes f serially. It will also merge calls
+// and ensure that there is a complete f() during w().
+func SyncFunc(f func()) (w func()) {
+	sf := &syncFunc{
+		f:    f,
 		once: &callOnce{},
+	}
+	return func() {
+		sf.Call()
 	}
 }
