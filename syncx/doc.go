@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package syncx provides synchronization primitives, complementing
-// the more common ones in the sync package.
+// Package syncx provides synchronization primitives that complement the sync
+// package, including events, done channels, semaphores, duplicate-filtering
+// channels, and merged serial function calls.
 package syncx
